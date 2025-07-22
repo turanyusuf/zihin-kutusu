@@ -1,0 +1,274 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zihin Kutusu</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .emotion-btn {
+      font-size: 2rem;
+      padding: 1rem;
+      border-radius: 50%;
+      background-color: #000;
+      color: #fff;
+      border: 2px solid #fff;
+      box-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #fff;
+      transition: all 0.3s ease;
+    }
+    .emotion-btn:hover {
+      transform: scale(1.1);
+    }
+    #message, #audio-player {
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    #message.show, #audio-player.show {
+      opacity: 1;
+    }
+    #loading {
+      transition: opacity 0.5s ease;
+    }
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid #fff;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    body {
+      transition: background-color 0.5s ease;
+    }
+    .bg-happy { background-color: #10b981; }
+    .bg-sad { background-color: #3b82f6; }
+    .bg-angry { background-color: #ef4444; }
+    .bg-confused { background-color: #8b5cf6; }
+    .bg-relaxed { background-color: #6ee7b7; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="loading" class="fixed inset-0 bg-gray-900 flex items-center justify-center">
+    <div class="spinner"></div>
+  </div>
+  <div class="container mx-auto p-4">
+    <h1 class="text-4xl font-bold text-center mb-8">Zihin Kutusu</h1>
+    <p class="text-2xl text-center mb-4">Bugün nasılsın?</p>
+    <div class="flex justify-center space-x-4 mb-8">
+      <button class="emotion-btn" data-emotion="happy">😊</button>
+      <button class="emotion-btn" data-emotion="sad">😔</button>
+      <button class="emotion-btn" data-emotion="angry">😠</button>
+      <button class="emotion-btn" data-emotion="confused">😵</button>
+      <button class="emotion-btn" data-emotion="relaxed">😌</button>
+    </div>
+    <div id="message" class="text-center mb-4 opacity-0"></div>
+    <audio id="audio-player" class="mb-4 opacity-0" autoplay loop></audio>
+    <textarea id="note" class="w-full p-2 mb-4 bg-gray-800 text-white rounded" placeholder="Notunuzu buraya yazın..."></textarea>
+    <button id="save-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Kaydet</button>
+    <button id="export-btn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded ml-4">Dışa Aktar</button>
+    <div id="diary-entries" class="mt-8">
+      <h2 class="text-2xl mb-4">Geçmiş Notlar</h2>
+      <ul id="entries-list" class="list-disc pl-5"></ul>
+    </div>
+    <canvas id="mood-chart" class="mt-8"></canvas>
+    <p id="quote" class="text-center text-sm mt-8"></p>
+  </div>
+  <script>
+    const emotions = {
+      happy: {
+        messages: ["Harikasın!", "Gülümsemeye devam et!", "Bugün senin günün!"],
+        sounds: ['assets/sounds/happy/track1.mp3', 'assets/sounds/happy/track2.mp3'],
+        bgClass: 'bg-happy'
+      },
+      sad: {
+        messages: ["Her şey geçer.", "Yarın yeni bir gün.", "Kendine iyi bak."],
+        sounds: ['assets/sounds/sad/track1.mp3', 'assets/sounds/sad/track2.mp3'],
+        bgClass: 'bg-sad'
+      },
+      angry: {
+        messages: ["Sakin ol, her şey yoluna girecek.", "Derin bir nefes al."],
+        sounds: ['assets/sounds/angry/track1.mp3', 'assets/sounds/angry/track2.mp3'],
+        bgClass: 'bg-angry'
+      },
+      confused: {
+        messages: ["Kafan karışık olabilir, ama her şey netleşecek.", "Zaman her şeyi çözer."],
+        sounds: ['assets/sounds/confused/track1.mp3', 'assets/sounds/confused/track2.mp3'],
+        bgClass: 'bg-confused'
+      },
+      relaxed: {
+        messages: ["Huzur içindesin, tadını çıkar!", "Rahatla ve anın keyfini çıkar."],
+        sounds: ['assets/sounds/relaxed/track1.mp3', 'assets/sounds/relaxed/track2.mp3'],
+        bgClass: 'bg-relaxed'
+      }
+    };
+
+    const quotes = [
+      "Bugün kötüyse, yarın başka bir gündür.",
+      "Her şey geçer.",
+      "Kendine inan, her şey mümkün."
+    ];
+
+    let selectedEmotion = null;
+    const audio = document.getElementById('audio-player');
+
+    document.querySelectorAll('.emotion-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedEmotion = btn.dataset.emotion;
+        const data = emotions[selectedEmotion];
+        const message = data.messages[Math.floor(Math.random() * data.messages.length)];
+        const sound = data.sounds[Math.floor(Math.random() * data.sounds.length)];
+        document.getElementById('message').textContent = message;
+        document.getElementById('message').classList.add('show');
+        audio.src = sound;
+        audio.classList.add('show');
+        audio.play().catch(e => console.error('Ses oynatma hatası:', e));
+        document.body.classList.remove('bg-happy', 'bg-sad', 'bg-angry', 'bg-confused', 'bg-relaxed');
+        document.body.classList.add(data.bgClass);
+      });
+    });
+
+    document.getElementById('save-btn').addEventListener('click', () => {
+      if (!selectedEmotion) {
+        alert('Lütfen bir duygu seçin.');
+        return;
+      }
+      const note = document.getElementById('note').value;
+      const date = new Date().toISOString().split('T')[0];
+      let diary = JSON.parse(localStorage.getItem('diary')) || [];
+      diary.push({ date, emotion: selectedEmotion, note });
+      localStorage.setItem('diary', JSON.stringify(diary));
+      alert('Not kaydedildi!');
+      document.getElementById('note').value = '';
+      displayDiary();
+      drawMoodChart();
+    });
+
+    document.getElementById('export-btn').addEventListener('click', () => {
+      const diary = localStorage.getItem('diary');
+      const blob = new Blob([diary], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'zihin-kutusu-diary.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    function displayDiary() {
+      const diary = JSON.parse(localStorage.getItem('diary')) || [];
+      const list = document.getElementById('entries-list');
+      list.innerHTML = '';
+      diary.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(entry => {
+        const li = document.createElement('li');
+        li.textContent = `${entry.date} - ${entry.emotion}: ${entry.note}`;
+        list.appendChild(li);
+      });
+    }
+
+    function drawMoodChart() {
+      const diary = JSON.parse(localStorage.getItem('diary')) || [];
+      if (diary.length === 0) return;
+      const emotionValues = {
+        happy: 5,
+        relaxed: 4,
+        confused: 3,
+        angry: 2,
+        sad: 1
+      };
+      const labels = diary.map(entry => entry.date);
+      const data = diary.map(entry => emotionValues[entry.emotion] || 0);
+      const ctx = document.getElementById('mood-chart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Ruh Hali',
+            data: data,
+            borderColor: '#26ffae',
+            backgroundColor: 'rgba(38, 255, 174, 0.2)',
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 5,
+              ticks: {
+                callback: function(value) {
+                  const emotions = {5: 'Mutlu', 4: 'Rahat', 3: 'Kafası Karışık', 2: 'Sinirli', 1: 'Üzgün'};
+                  return emotions[value] || value;
+                }
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: 'Tarih'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    window.addEventListener('load', () => {
+      const loading = document.getElementById('loading');
+      loading.classList.add('opacity-0');
+      setTimeout(() => {
+        loading.style.display = 'none';
+      }, 500);
+      document.getElementById('quote').textContent = quotes[Math.floor(Math.random() * quotes.length)];
+      displayDiary();
+      drawMoodChart();
+    });
+  </script>
+</body>
+</html>
